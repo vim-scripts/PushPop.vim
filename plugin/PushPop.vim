@@ -1,9 +1,9 @@
 " PushPop.vim -- pushd/popd implementation for VIM
 " Author: Hari Krishna Dara <hari_vim@yahoo.com>
-" Last Change:  10-Feb-2002 @ 21:08
+" Last Change:  19-Mar-2002 @ 22:47
 " Created:      31-Jan-1999
 " Requires: Vim-6.0, multvals.vim(2.1.1)
-" Version: 2.0.2
+" Version: 2.0.5
 " Description:
 "   The script provides a pushd/popd functionality for Vim taking Bash as a
 "     reference. It defines new commands called Pushd, Popd (and Pud, Pod as
@@ -11,7 +11,17 @@
 "     pod cd and dirs (the lower case versions) to make it easy to type and get
 "     used to, but if it causes any trouble for you regular command line typing,
 "     just set the g:pushpopNoAbbrev variable in your .vimrc.
-"    Most of the Bash pushd/popd syntax is supported.
+"   Most of the Bash pushd/popd syntax is supported.
+"   It also provides Cdp command to quickly cd to the previous directory,
+"     Which works even if you forgot to use the Pushd command and just used
+"     the regular Cd command. It also creates a OLDPWD global variable (on the
+"     lines of bash) which always contains the name of the previous directory.
+"   The Cdc command will push the directory of the current file on to the
+"     stack and cd into it.
+"   It also exposes the main functions as global functions, which can be used
+"     by the script writers to write scripts that can move around in the
+"     directory hierarchy and finally leave the working directory as the
+"     original.
 " Installation:
 "   Drop this and multvals.vim in your plugin directory to install it. If you
 "     rather want to manually source it, make sure multvals.vim is sourced
@@ -19,14 +29,18 @@
 " Environment:
 "   Adds
 "       PPInitialize,
-"       Pushd, Pud, Popd, Pod, Cd, Dirs
+"       Pushd, Pud, Popd, Pod, Cd, Cdp, Cdc, Dirs
 "     commands.
 "   Adds
-"       pushd, popd, pud, pod, cd, dirs
-"     command line abbreviations.
-" TODO:
-"       The Bash implementation supports the "-n" option, but it is not
-"         supported here as I didn't think it is useful.
+"       pushd, popd, pud, pod, cd, cdp, cdc, dirs
+"     command line abbreviations, if not disabled.
+"   Adds
+"       Pushd, Popd, Cd, Dirs
+"     global functions. 
+"
+" Incompatibilities:
+"   The Bash implementation supports the "-n" option, but it is not supported
+"     here as I didn't think it is useful.
 
 if exists("loaded_pushpop")
   finish
@@ -34,6 +48,7 @@ endif
 let loaded_pushpop = 1
 
 
+" We need this at the time of initialization itself.
 if !exists("loaded_multvals")
   runtime plugin/multvals.vim
 endif
@@ -53,7 +68,7 @@ function! s:Initialize()
 if exists("g:pushpopDirSep")
   let s:dirSep = g:pushpopDirSep
   unlet g:pushpopDirSep
-else
+elseif !exists("s:dirSep")
   let s:dirSep = ';'
 endif
 
@@ -62,21 +77,38 @@ endif
 if exists("g:pushpopShowDirs")
   let s:showDirs = g:pushpopShowDirs
   unlet g:pushpopShowDirs
-else
+elseif !exists("s:showDirs")
   let s:showDirs = 1
 endif
 
 " Define the commands to conveniently access them. Use the same commands as
 " that provided by csh.
-" PROBLEM: why is this passing the string "  " if no arguments are given ???
-command! -nargs=? -complete=dir Pud call Pushd(<q-args>)
-command! -nargs=? -complete=dir Pushd call Pushd(<q-args>)
-command! -nargs=? -complete=dir Dirs call Dirs(<q-args>)
-command! -nargs=? -complete=dir Pod call Popd(<q-args>)
-command! -nargs=? -complete=dir Popd call Popd(<q-args>)
-command! -nargs=? -complete=dir Cd call Cd(<q-args>)
+command! -nargs=? -complete=dir Pud call Pushd(<f-args>)
+command! -nargs=? -complete=dir Pushd call Pushd(<f-args>)
+command! -nargs=? -complete=dir Dirs call Dirs(<f-args>)
+command! -nargs=? -complete=dir Pod call Popd(<f-args>)
+command! -nargs=? -complete=dir Popd call Popd(<f-args>)
+command! -nargs=? -complete=dir Cd call Cd(<f-args>)
+command! -nargs=? -complete=dir Cdp call Cd(g:OLDPWD)
+command! -nargs=? -complete=dir Cdc call Pushd(expand("%:p:h"))
 
-if ! exists("g:pushpopNoAbbrev")
+if exists("g:pushpopNoAbbrev")
+  let s:noAbbrev = g:pushpopNoAbbrev
+  unlet g:pushpopNoAbbrev
+elseif !exists("s:noAbbrev")
+  let s:noAbbrev = 0
+endif
+
+if s:noAbbrev
+  silent! cuna pud
+  silent! cuna pushd
+  silent! cuna pod
+  silent! cuna popd
+  silent! cuna dir
+  silent! cuna cd
+  silent! cuna cdp
+  silent! cuna cdc
+else
   ca pud Pud
   ca pushd Pushd
   ca pod Pod
@@ -84,12 +116,13 @@ if ! exists("g:pushpopNoAbbrev")
   ca dirs Dirs
   " How nice if there is an autocommand trigger for change directory also?
   ca cd Cd
-else
-  unlet g:pushpopNoAbbrev
+  ca cdp Cdp
+  ca cdc Cdc
 endif
 
 " Initialize the directory stack.
 let s:dirStack = MvAddElement('', s:dirSep, getcwd())
+let g:OLDPWD = getcwd()
 
 endfunction " s:Initialize
 
@@ -101,8 +134,7 @@ call s:Initialize()
 
 " List out all the directories in the stack.
 function! Dirs(...)
-  " HACK for a dummy argument is getting passed though none are specified.
-  if a:0 == 0 || (a:0 == 1 && a:1 == "")
+  if a:0 == 0
     call s:DirsImpl()
   else " if a:0 == 1
     call s:DirsOptImpl(a:1)
@@ -127,8 +159,7 @@ endfunction
 
 " Pushd.
 function! Pushd(...)
-  " HACK for a dummy argument is getting passed though none are specified.
-  if a:0 == 0 || (a:0 == 1 && a:1 == "")
+  if a:0 == 0
     let nDirs = s:NoOfDirs()
     " First check if there are two entries.
     if nDirs == 1
@@ -137,7 +168,7 @@ function! Pushd(...)
     endif
 
     " Exchange the first two entries.
-    call s:PushdIndexImpl(1) " Switch to the second dir in the stack.
+    call s:PushdNoArgImpl()
   else " if a:0 == 1
     " If a directory name is given, then push it on to the stack.
     if match(a:1, "^[-+]") != 0
@@ -176,13 +207,12 @@ function! Popd(...)
     return
   endif
 
-  " HACK for a dummy argument is getting passed though none are specified.
-  if a:0 == 0 || (a:0 == 1 && a:1 == "")
+  if a:0 == 0
     call s:PopdImpl()
   elseif a:0 == 1 " We expect only an index.
     let dirIndex = strpart(a:1, 1)
     if match(a:1, "+") != 0 || match(dirIndex, '\d\+') == -1
-      echohl ERROR | echo a:for . ": bad argument " . a:1 | echohl NONE
+      echohl ERROR | echo "popd: bad argument " . a:1 | echohl NONE
       return
     endif
 
@@ -205,7 +235,7 @@ function! s:CdImpl(dir)
     let s:dirStack = MvRemoveElementAt(s:dirStack, s:dirSep, 0)
     let s:dirStack = MvInsertElementAt(s:dirStack, s:dirSep, fullPath, 0)
   endif
-  call s:ChDir(a:dir)
+  call s:ChDir(a:dir, 0)
 endfunction
 
 
@@ -267,7 +297,20 @@ endfunction
 function! s:PushdImpl(dir)
   let fullPath = fnamemodify(a:dir, ":p")
   let s:dirStack = MvInsertElementAt(s:dirStack, s:dirSep, fullPath, 0)
-  call s:ChDir(a:dir)
+  call s:ChDir(a:dir, s:showDirs)
+endfunction
+
+" Switch between the top two dirs.
+function! s:PushdNoArgImpl()
+  let nDirs = s:NoOfDirs()
+  if nDirs < 2
+    echohl ERROR | echo "pushd: no other direcotyr" | echohl NONE
+    return
+  endif
+
+  let dirToCd = s:DirAt(1)
+  let s:dirStack = MvPushToFrontElementAt(s:dirStack, s:dirSep, 1)
+  call s:ChDir(dirToCd, s:showDirs)
 endfunction
 
 
@@ -282,7 +325,7 @@ function! s:PushdIndexImpl(dirIndex)
 
   let dirToCd = s:DirAt(a:dirIndex)
   let s:dirStack = MvRotateLeftAt(s:dirStack, s:dirSep, a:dirIndex)
-  call s:ChDir(dirToCd)
+  call s:ChDir(dirToCd, s:showDirs)
 endfunction
 
 
@@ -298,7 +341,7 @@ function! s:PopdImpl()
   call s:RemoveDirAt(0)
   " If this is not the last one which is popped.
   if nDirs > 1
-    call s:ChDir(s:DirAt(0))
+    call s:ChDir(s:DirAt(0), s:showDirs)
   endif
 endfunction
 
@@ -323,10 +366,13 @@ function! s:PopdIndexImpl(dirIndex)
 endfunction
 
 
-function! s:ChDir(dir)
+function! s:ChDir(dir, showDirs)
+  " First save the current dir in g:OLDPWD. 
+  let g:OLDPWD = getcwd()
+
   " echo ":cd" a:dir
   exec ":cd" a:dir
-  if s:showDirs
+  if a:showDirs
     call Dirs()
   endif
 endfunction
