@@ -1,0 +1,149 @@
+This is a mirror of http://www.vim.org/scripts/script.php?script_id=129
+
+PLEASE READ THE INSTALL SECTION.
+
+- The script provides a pushd/popd functionality for Vim taking Bash as a
+  reference. It defines new commands called Pushd, Popd and Cd and Dirs.
+  It also defines abbreviations pushd and popd (the lower case versions)
+  to make it easier to type and get used to, but if it causes any
+  trouble for your regular command line typing (as the abbreviations are
+  expanded anywhere you type), just set the g:pushpopNoAbbrev variable in
+  your .vimrc, or install cmdalias.vim also along with PushPop.vim (in
+  which case additional abbreviations are defined for dirs and cdp as
+  well). The cmdalias.vim plugin provides support for defining
+  abbreviations that expand only at the start of the command-line, which
+  make the abbreviations behave just like bash aliases, or like the Vim
+  built-in commands (read the plugin's description for more information).
+- Most of the Bash pushd/popd syntax is supported.
+- The plugin integrates seamlessly with the vim features such as 'cdpath'.
+  It handles the protected command and space chars correctly as expected,
+  however, unprotected spaces are not treated as separators (which is the
+  case with 'cdpath' for the sake of backward compatibility with age old
+  vim 3.0).
+- Vim provides a "cd -" command to quickly jump back to the previous
+  directory on the lines of bash, to make it complete, the script
+  sets the g:OLDPWD variable to mimic the $OLDPWD variable of bash.
+- The Cdp command will push the directory of the current file on to the
+  stack and cd into it.
+- It provides commands to make it easy to manipulate the "cdpath" and save
+  and restore it (unless the persistence feature of genutils.vim is
+  disabled), without needing to manually edit the vimrc. The "PPAddDir"
+  command will allow you to add the specified directory or the current
+  directory (with no arguments) to 'cdpath'. The "PPRemoveDir" command can
+  be used to remove a directory by its name or index, or just the current
+  directory (whith no arguments). Both commands accept "-l" as an option
+  to specify the directory argument literally (the directory name is then
+  not modified). The "-l" option with no arguments can also be used to
+  add/remove "empty" directory entry (represented as ^, or ,, or ,$ in the
+  'cdpath'). If you need to add entried that have wild-cards in them (such
+  as "src/**", the above commands can't be used as Vim will try to expand
+  the wildcards before the plugin can see them, so in this case use
+  "PPAddPat" and "PPRemovePat" commands. Pass "-l" option to avoid
+  modification.
+- To view the list of directories in your 'cdpath', use the regular "set
+  cdpath?" command or just "Cdpath". In addition, the "Cd" command accepts
+  "-i" option to cd directly into one of the directories in 'cdpath'. With
+  no arguments, you will be prompted with the list of directories to
+  select from, and with an index as the argument (starting from 0), you
+  can directly cd into the directory at that index.
+- If g:pushpopCdable_vars is set, the plugin emulates the bash
+  'cdable_vars' feature. When the built-in ":cd" fails, the argument is
+  assumed to be the name of a global variable whose value is the directory
+  to change to. Normally, you don't necessarily need to use the :Cd
+  command instead of :cd command, but in this particular case, the feature
+  will not work unless you use the :Cd command. Consider aliasing :cd to
+  :Cd as described in Deprecations section below.
+- The main functions are also exposed as global functions, which can be used
+  by the script writers to recursively traverse directories and finally
+  return back to the original directory.
+
+Please see the script header for more information such as deprecations etc.
+
+Please send in your comments/feedback/suggestions/contributions for improving the script.
+
+=================================================
+You can refer to the bash manual page for more information on how to use Pushd, Popd and Dirs commands. In case you don't have access to it, here is an extract from bash man page (on cygwin):
+
+       pushd [-n] [dir]
+       pushd [-n] [+n] [-n]
+              Adds a directory to the top of the directory stack,
+              or  rotates  the  stack,  making the new top of the
+              stack the current working directory.  With no argu-
+              ments,   exchanges  the  top  two  directories  and
+              returns 0, unless the  directory  stack  is  empty.
+              Arguments,  if  supplied,  have the following mean-
+              ings:
+              +n     Rotates the stack so that the nth  directory
+                     (counting from the left of the list shown by
+                     dirs, starting with zero) is at the top.
+              -n     Rotates the stack so that the nth  directory
+                     (counting  from  the right of the list shown
+                     by dirs, starting with zero) is at the  top.
+              -n     Suppresses  the  normal  change of directory
+                     when adding directories  to  the  stack,  so
+                     that only the stack is manipulated.
+              dir    Adds  dir to the directory stack at the top,
+                     making it the new current working directory.
+
+              If  the pushd command is successful, a dirs is per-
+              formed as well.  If the first form is  used,  pushd
+              returns  0  unless  the  cd to dir fails.  With the
+              second form, pushd returns 0 unless  the  directory
+       popd [-n] [+n] [-n]
+              Removes  entries from the directory stack.  With no
+              arguments,  removes  the  top  directory  from  the
+              stack,  and performs a cd to the new top directory.
+              Arguments, if supplied, have  the  following  mean-
+              ings:
+              +n     Removes the nth entry counting from the left
+                     of the list shown  by  dirs,  starting  with
+                     zero.   For example: ``popd +0'' removes the
+                     first directory, ``popd +1'' the second.
+              -n     Removes the  nth  entry  counting  from  the
+                     right  of  the  list shown by dirs, starting
+                     with zero.  For example: ``popd -0'' removes
+                     the  last directory, ``popd -1'' the next to
+                     last.
+              -n     Suppresses the normal  change  of  directory
+                     when removing directories from the stack, so
+                     that only the stack is manipulated.
+
+              If the popd command is successful, a dirs  is  per-
+              formed  as  well, and the return status is 0.  popd
+              returns false if an invalid option is  encountered,
+              the directory stack is empty, a non-existent direc-
+              stack is empty, a non-existent directory stack ele-
+              ment is specified, or the directory change  to  the
+              specified new current directory fails.
+              tory stack entry is  specified,  or  the  directory
+              change fails.
+       dirs [-clpv] [+n] [-n]
+              Without  options,  displays  the  list of currently
+              remembered directories.  The default display is  on
+              a  single  line  with  directory names separated by
+              spaces.  Directories are added to the list with the
+              pushd  command;  the  popd  command removes entries
+              from the list.
+              +n     Displays the nth  entry  counting  from  the
+                     left  of the list shown by dirs when invoked
+                     without options, starting with zero.
+              -n     Displays the nth  entry  counting  from  the
+                     right of the list shown by dirs when invoked
+                     without options, starting with zero.
+              -c     Clears the directory stack by  deleting  all
+                     of the entries.
+              -l     Produces a longer listing; the default list-
+                     ing format uses a tilde to denote  the  home
+                     directory.
+              -p     Print the directory stack with one entry per
+                     line.
+              -v     Print the directory stack with one entry per
+                     line, prefixing each entry with its index in
+                     the stack.
+
+              The return value is 0 unless an invalid  option  is
+              supplied  or n indexes beyond the end of the direc-
+              tory stack.
+=================================================
+
+Search_key_words: push pop directory cd change bash csh dirs pushpop genutils Hari Krishna Dara
