@@ -1,9 +1,11 @@
 " PushPop.vim -- pushd/popd implementation for VIM
 " Author: Hari Krishna Dara <hari_vim@yahoo.com>
-" Last Change:  13-Aug-2002 @ 23:33
+" Last Change:  14-Aug-2002 @ 18:06
 " Created:      31-Jan-1999
 " Requires: Vim-6.0, genutils.vim(1.1), multvals.vim(2.1.1)
-" Version: 2.1.1
+" Version: 2.2.1
+" Download From:
+"     http://vim.sourceforge.net/script.php?script_id=129 
 " Description:
 "   The script provides a pushd/popd functionality for Vim taking Bash as a
 "     reference. It defines new commands called Pushd, Popd (and Pud, Pod as
@@ -295,7 +297,7 @@ function! s:PPAddDir(...)
   if a:0 == 0
     let newDir = getcwd()
   else
-    let newDir = a:1
+    let newDir = fnamemodify(a:1, ':p')
   endif
   let &cdpath = MvAddElement(&cdpath, ',', newDir)
 endfunction
@@ -307,7 +309,8 @@ function! s:PPRemoveDir(...)
 
   else " if a:0 == 1
     if match(a:1, "^[-+]") != 0
-      call s:RemoveDirImpl(a:1)
+      let newDir = fnamemodify(a:1, ':p')
+      call s:RemoveDirImpl(newDir)
 
     else " An index is given.
       let nDirs = MvNumberOfElements(&cdpath, ',')
