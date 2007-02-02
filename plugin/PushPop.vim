@@ -1,10 +1,10 @@
 " PushPop.vim -- pushd/popd implementation for VIM
-" Author: Hari Krishna Dara <hari_vim@yahoo.com>
-" Last Change:  19-Aug-2003 @ 11:17
+" Author: Hari Krishna Dara (hari_vim at yahoo dot com)
+" Last Change:  02-Feb-2007 @ 09:20
 " Created:      31-Jan-1999
-" Requires: Vim-6.0, genutils.vim(1.7), multvals.vim(3.3)
-" Depends On: cmdalias.vim(1.0)
-" Version: 2.4.3
+" Requires: Vim-7.0, genutils.vim(2.0)
+" Depends On: cmdalias.vim(2.0)
+" Version: 4.0.0
 " Licence: This program is free software; you can redistribute it and/or
 "          modify it under the terms of the GNU General Public License.
 "          See http://www.gnu.org/copyleft/gpl.txt 
@@ -35,20 +35,20 @@
 "   - The Cdp command will push the directory of the current file on to the
 "     stack and cd into it.
 "   - It provides commands to make it easy to manipulate the "cdpath" and save
-"     and restore it (unless the persistence feature of genutils.vim is
-"     disabled), without needing to manually edit the vimrc. The "PPAddDir"
-"     command will allow you to add the specified directory or the current
-"     directory (with no arguments) to 'cdpath'. The "PPRemoveDir" command can
-"     be used to remove a directory by its name or index, or just the current
-"     directory (whith no arguments). Both commands accept "-l" as an option
-"     to specify the directory argument literally (the directory name is then
-"     not modified). The "-l" option with no arguments can also be used to
-"     add/remove "empty" directory entry (represented as ^, or ,, or ,$ in the
-"     'cdpath'). If you need to add entried that have wild-cards in them (such
-"     as "src/**", the above commands can't be used as Vim will try to expand
-"     the wildcards before the plugin can see them, so in this case use
-"     "PPAddPat" and "PPRemovePat" commands. Pass "-l" option to avoid
-"     modification.
+"     and restore it (unless the persistence feature of genutils.vim or the
+"     g:pushpopPersistCdpath feature is disabled), without needing to manually
+"     edit the vimrc. The "PPAddDir" command will allow you to add the
+"     specified directory or the current directory (with no arguments) to
+"     'cdpath'. The "PPRemoveDir" command can be used to remove a directory by
+"     its name or index, or just the current directory (whith no arguments).
+"     Both commands accept "-l" as an option to specify the directory argument
+"     literally (the directory name is then not modified). The "-l" option
+"     with no arguments can also be used to add/remove "empty" directory entry
+"     (represented as ^, or ,, or ,$ in the 'cdpath'). If you need to add
+"     entried that have wild-cards in them (such as "src/**", the above
+"     commands can't be used as Vim will try to expand the wildcards before
+"     the plugin can see them, so in this case use "PPAddPat" and
+"     "PPRemovePat" commands. Pass "-l" option to avoid modification.
 "   - To view the list of directories in your 'cdpath', use the regular "set
 "     cdpath?" command or just "Cdpath". In addition, the "Cd" command accepts
 "     "-i" option to cd directly into one of the directories in 'cdpath'. With
@@ -67,7 +67,7 @@
 "     return back to the original directory.
 " Installation:
 "   - Drop the script in your plugin directory to install it. Requires
-"     multvals.vim and genutils.vim.
+"     genutils.vim.
 " Summary Of Features:
 "   New commands:
 "       Pushd, Popd, Cd, Cdp, Dirs, Cdpath,
@@ -80,8 +80,23 @@
 "       PPPushd, PPPopd, PPCd, PPDirs, PPSetShowDirs, PPGetShowDirs, PPAddDir,
 "       PPRemoveDir
 "   Settings:
-"       g:pushpopShowDirs, g:pushpopNoAbbrev, g:pushpopUseGUIDialogs,
-"       g:pushpopPersistCdpath
+"     - g:pushpopShowDirs:
+"	  Unset this to avoid dirs command getting automatically executed
+"	  after every successful pushd/popd.
+"     - g:pushpopNoAbbrev:
+"	  Set this to avoid creating abbreviations.
+"     - g:pushpopUseGUIDialogs:
+"	  Normally, console dialogs are used even in gvim, which has the
+"	  advantage of having a history and expression register. But if you
+"	  rather prefer GUI dialogs, then set this variable.
+"     - g:pushpopPersistCdpath:
+"	  Unset this to avoid saving and restoring 'cdpath' across vim
+"	  sessions. This feature should be unset if you use environmental
+"	  variables while setting the 'cdpath' from your vimrc. Otherwise,
+"	  after one cycle of saving and restoring the environmental variables
+"	  will be replaced with static paths.
+"     - g:pushpopCdable_vars:
+"	  Set this to turn on bash's 'cdable_vars' like feature. 
 " Deprecations:
 "   - Since version 2.3, the plugin doesn't define the Pud and Pod commands
 "     anymore. However, you can define them yourself easily by placing the
@@ -109,17 +124,15 @@
 "   The "-l" option to "Dirs" doesn't have any special treatment.
 "
 " TODO: {{{
-"   - Env. variables in 'path' are being expanded, but not in 'cdpath'.
-"
-"   - We need a flag to prevent persistence features and explain the impact of
-"     using persistence feature when env. variables are used.
+"   - Pushd +0 seems to duplicate the first item, can this be used as a
+"     feature?
 "   - What about reordering 'cdpath' items? It will be nice if the same set of
 "     options to modify the dir.stack are also available for cdpath as well.
 "     Or, support an option to Pushd and Popd that operate on cdpath instead
 "     of dir.stack.
 "   - How about implementing lcd also?
 " TODO }}}
-" CAUTION: {{{
+" BEGIN NOTES: {{{
 "   - The implementation assumes that the first directory in the directory
 "     stack is always the current directory (which btw, seems to be true even
 "     with bash implementation), which allows a delayed syncing of the current
@@ -128,12 +141,23 @@
 "     so that the rest of the code can safely make the assumption. If there
 "     are any new such functions instroduced in the future, care must be taken
 "     to not to break this assumption.
-" CAUTION }}}
+" END NOTES }}}
 
+if v:version < 700
+  echomsg 'PushPop: You need at least Vim 7.0'
+  finish
+endif
 if exists("loaded_pushpop")
   finish
 endif
-let loaded_pushpop = 1
+if !exists("loaded_genutils")
+  runtime plugin/genutils.vim
+endif
+if !exists("loaded_genutils") || loaded_genutils < 200
+  echomsg "PushPop: You need a newer version of genutils.vim plugin"
+  finish
+endif
+let loaded_pushpop = 300
 
 " If cmdalias.vim is available, let it be sourced before we get sourced.
 if !exists("loaded_cmdalias")
@@ -148,109 +172,78 @@ command! -nargs=0 PPInitialize :call <SID>Initialize()
 " Initialize {{{
 function! s:Initialize()
 
-  "
-  " Configuration options:
-  "
+" [-2s]
+" Configuration options:
+"
 
-  " Set a non-zero value to automatically executes the dirs command after every
-  "   successful pushd/popd. The default is to show dirs.
-  if exists("g:pushpopShowDirs")
-    let s:showDirs = g:pushpopShowDirs
-    unlet g:pushpopShowDirs
-  elseif !exists("s:showDirs")
-    let s:showDirs = 1
+if !exists('s:showDirs') " The first-time only, initialize with defaults.
+  let s:showDirs = 1
+  let s:noAbbrev = 0
+  let s:useDialogs = 0
+  let s:persistCdpath = 1
+  let s:cdable_vars = 0
+endif
+
+function! s:CondDefSetting(globalName, settingName, ...)
+  let assgnmnt = (a:0 != 0) ? a:1 : a:globalName
+  if exists(a:globalName)
+    exec "let" a:settingName "=" assgnmnt
+    exec "unlet" a:globalName
   endif
+endfunction
 
-  if exists("g:pushpopNoAbbrev")
-    let s:noAbbrev = g:pushpopNoAbbrev
-    unlet g:pushpopNoAbbrev
-  elseif !exists("s:noAbbrev")
-    let s:noAbbrev = 0
-  endif
+call s:CondDefSetting('g:pushpopShowDirs', 's:showDirs') 
+call s:CondDefSetting('g:pushpopNoAbbrev', 's:noAbbrev')
+call s:CondDefSetting('g:pushpopUseGUIDialogs', 's:useDialogs') 
+call s:CondDefSetting('g:pushpopPersistCdpath', 's:persistCdpath')
+call s:CondDefSetting('g:pushpopCdable_vars', 's:cdable_vars')
 
-  " Normally, we use console dialogs even in gvim, which has the advantage of
-  "   having an history and expression register. But if you rather prefer GUI
-  "   dialogs, then set this variable.
-  if exists("g:pushpopUseGUIDialogs")
-    let s:useDialogs = g:pushpopUseGUIDialogs
-    unlet g:pushpopUseGUIDialogs
-  elseif !exists("s:useDialogs")
-    let s:useDialogs = 0
-  endif
+" Define the commands to conveniently access them. Use the same commands as
+" that provided by csh.
+command! -nargs=? -complete=dir Pushd call PPPushd(<f-args>)
+command! -nargs=? -complete=dir Dirs call PPDirs(<f-args>)
+command! -nargs=? -complete=dir Popd call PPPopd(<f-args>)
+command! -nargs=* -complete=dir Cd call PPCd(<f-args>)
+command! -nargs=0 -complete=dir Cdp call PPCdp()
+command! -nargs=? -complete=dir PPAddDir :call PPAddDir(0, <f-args>)
+command! -nargs=? PPAddPat :call PPAddDir(1, <f-args>)
+command! -nargs=? -complete=dir PPRemoveDir :call PPRemoveDir(0, <f-args>)
+command! -nargs=? PPRemovePat :call PPRemoveDir(1, <f-args>)
+command! -nargs=? -complete=dir Cdpath :set cdpath?
 
-  if exists("g:pushpopPersistCdpath")
-    let s:persistCdpath = g:pushpopPersistCdpath
-    unlet g:pushpopPersistCdpath
-  elseif !exists("s:persistCdpath")
-    let s:persistCdpath = 1
-  endif
-
-  if exists("g:pushpopCdable_vars")
-    let s:cdable_vars = g:pushpopCdable_vars
-    unlet g:pushpopCdable_vars
-  elseif !exists("s:cdable_vars")
-    let s:cdable_vars = 0
-  endif
-
-  " Define the commands to conveniently access them. Use the same commands as
-  " that provided by csh.
-  command! -nargs=? -complete=dir Pushd call PPPushd(<f-args>)
-  command! -nargs=? -complete=dir Dirs call PPDirs(<f-args>)
-  command! -nargs=? -complete=dir Popd call PPPopd(<f-args>)
-  command! -nargs=* -complete=dir Cd call PPCd(<f-args>)
-  command! -nargs=0 -complete=dir Cdp call PPCdp()
-  command! -nargs=? -complete=dir PPAddDir :call PPAddDir(0, <f-args>)
-  command! -nargs=? PPAddPat :call PPAddDir(1, <f-args>)
-  command! -nargs=? -complete=dir PPRemoveDir :call PPRemoveDir(0, <f-args>)
-  command! -nargs=? PPRemovePat :call PPRemoveDir(1, <f-args>)
-  command! -nargs=? -complete=dir Cdpath :set cdpath?
-
-  if s:noAbbrev
-    silent! cuna pushd
-    silent! cuna popd
-    silent! cuna cd
+if s:noAbbrev
+  silent! cuna pushd
+  silent! cuna popd
+  silent! cuna cd
+else
+  if exists('*CmdAlias')
+    call CmdAlias('pushd', 'Pushd')
+    call CmdAlias('popd', 'Popd')
+    call CmdAlias('dirs', 'Dirs')
+    call CmdAlias('cdp', 'Cdp')
   else
-    if exists('*CmdAlias')
-      call CmdAlias('pushd', 'Pushd')
-      call CmdAlias('popd', 'Popd')
-      call CmdAlias('dirs', 'Dirs')
-      call CmdAlias('cdp', 'Cdp')
-    else
-      ca pushd Pushd
-      ca popd Popd
-    endif
+    ca pushd Pushd
+    ca popd Popd
   endif
+endif
 
-  aug PushPop
+aug PushPop
   au!
   if s:persistCdpath
     au VimEnter * call <SID>LoadSettings()
     au VimLeavePre * call <SID>SaveSettings()
   endif
-  aug End
-endfunction
-
-" Defining these functions here simplifies the job of initializing dirStack.
-function! s:Escape(dir)
-  " See rules at :help 'path'
-  return escape(escape(escape(a:dir, ', '), "\\"), ' ')
-endfunction
-
-function! s:DeEscape(dir)
-  let dir = a:dir
-  let dir = substitute(dir, '\\\@<!\%(\\\\\)\\,', ',', 'g')
-  let dir = substitute(dir, '\\\@<!\%(\\\\\)\\ ', ' ', 'g')
-  return dir
-endfunction
+aug End
 
 " Initialize the directory stack.
-let s:dirStack = s:Escape(getcwd()) . ','
+let s:dirStack = []
+endfunction
+
 let g:OLDPWD = getcwd()
 " Unprotected comma as separator for cdpath.
-let s:COMMA_AS_SEP = '\\\@<!\%(\\\\\)*,'
+let s:COMMA_AS_SEP = genutils#CrUnProtectedCharsPattern(',')
 "let s:COMMA_AS_SEP = '\%(^,,\|\\\@<!\%(\\\\\)*,\)'
 
-call s:Initialize()
 " Initialize }}}
 
 
@@ -284,36 +277,36 @@ function! PPCd(...)
     let dir = "" " Let vim handle no arg.
   else
     if a:0 == 1 && match(a:1, "^[-+].") == 0
-      if match(a:1, '^[-+]\d\+') == -1 && a:1 != '-i'
+      if match(a:1, '^[-+]\d\+') == -1 && a:1 !=# '-i'
         return s:CdUsage("bad usage.")
       endif
 
-      let nDirs = s:PPNoOfDirs()
-      if a:1 == '-i'
+      let nDirs = s:CPNoOfDirs()
+      if a:1 ==# '-i'
         if nDirs == 1
-          echohl ERROR | echo "Cd: directory stack is empty." | echohl None
+          echohl ERROR | echo "Cd: cdpath is empty." | echohl None
           return 0
         endif
 
         " Prompt for directory.
-        let dirIndex = s:PPPromptForDirIndex('')
+        let dirIndex = s:CPPromptForDirIndex('')
 	if dirIndex == '' || dirIndex == -1
 	  return 0
 	endif
-        let dir = s:PPDirAt(dirIndex)
+        let dir = s:CPDirAt(dirIndex)
       else
         " Lookup directory by index.
         let dirIndex = strpart(a:1, 1)
-        if a:1[0] == '-'
+        if a:1[0] ==# '-'
           let dirIndex = (nDirs - 1) - dirIndex
         endif
         if dirIndex < 0 || dirIndex >= nDirs
-          echohl ERROR | echo "Cd: " . a:1 . ": bad directory stack index." |
+          echohl ERROR | echo "Cd: " . a:1 . ": bad cdpath index." |
 	 \ echohl NONE
           return 0
         endif
 
-        let dir = s:PPDirAt(dirIndex)
+        let dir = s:CPDirAt(dirIndex)
       endif
     else
       if a:0 == 1
@@ -322,9 +315,7 @@ function! PPCd(...)
       " This may or may not be an error (depending on the OS), so let vim deal
       "   with it.
       else
-        exec MakeArgumentList('argumentList', ' ')
-
-        let dir = argumentList
+        let dir = join(a:000, ' ')
       endif
     endif
   endif
@@ -342,7 +333,7 @@ function! PPPushd(...)
   else " if a:0 >= 1
     " If a directory name is given, then push it on to the stack.
     if match(a:1, '^[-+]\d\+') != 0
-      if a:1 == '-i'
+      if a:1 ==# '-i'
         let nDirs = s:PPNoOfDirs()
         if nDirs == 1
           echohl ERROR | echo "Pushd: directory stack is empty." | echohl None
@@ -364,7 +355,7 @@ function! PPPushd(...)
       if match(dirIndex, '\d\+') == -1
         return s:PushdUsage(a:1 . ": bad argument.")
       endif
-      if a:1[0] == '-'
+      if a:1[0] ==# '-'
         let dirIndex = (nDirs - 1) - dirIndex
       endif
       if dirIndex < 0 || dirIndex >= nDirs
@@ -392,7 +383,7 @@ function! PPPopd(...)
   else " if a:0 >= 1
     " If a directory name is given, then pop it from the stack.
     if match(a:1, '^[-+]\d\+') != 0
-      if a:1 == '-i'
+      if a:1 ==# '-i'
         let nDirs = s:PPNoOfDirs()
         if nDirs == 1
           echohl ERROR | echo "Popd: directory stack is empty." | echohl None
@@ -413,7 +404,7 @@ function! PPPopd(...)
       if match(a:1, "^[-+]") != 0 || match(dirIndex, '\d\+') == -1
 	return s:PopdUsage(a:1 . ": bad argument.")
       endif
-      if a:1[0] == '-'
+      if a:1[0] ==# '-'
 	let dirIndex = (nDirs - 1) - dirIndex
       endif
       if dirIndex < 0 || dirIndex >= nDirs
@@ -444,7 +435,7 @@ function! PPAddDir(asPat, ...)
   let newDir = ''
   if a:0 == 0
     let newDir = getcwd()
-  elseif a:1 == '-l' && a:0 <=2
+  elseif a:1 ==# '-l' && a:0 <=2
     if a:0 != 2
       let newDir = ''
     else
@@ -477,7 +468,7 @@ function! PPRemoveDir(asPat, ...)
     endif
     let dir = s:CPDirAt(dirIndex)
   else " if a:0 >= 1
-    if a:1 == '-l' && a:0 <=2
+    if a:1 ==# '-l' && a:0 <=2
       if a:0 == 1
 	let dir = ''
       else
@@ -497,7 +488,7 @@ function! PPRemoveDir(asPat, ...)
             \ echohl NONE
         return
       endif
-      if a:1[0] == '-'
+      if a:1[0] ==# '-'
         let dirIndex = (nDirs - 1) - dirIndex
       endif
       if dirIndex < 0 || dirIndex >= nDirs
@@ -537,7 +528,7 @@ endfunction
 function! s:DirsImpl(...)
   let dirsStr = ''
   if a:0 == 0
-    let dirsStr = s:DirsStr(" ")
+    let dirsStr = s:DirsJoin(" ")
   else
     let opt = a:1
     let nDirs = s:PPNoOfDirs()
@@ -559,32 +550,23 @@ function! s:DirsImpl(...)
       let dirsStr = s:PPDirAt(dirIndex)
 
       " Clears the directory stack by deleting all of the entries.
-    elseif opt == "-c"
+    elseif opt ==# "-c"
       call s:PPClearDirs()
       " Produces a longer listing; the default list-ing format uses a tilde to
       "   denote the home directory.
-    elseif opt == "-l"
+    elseif opt ==# "-l"
       " For now there is no long listing.
-      let dirsStr = s:DirsStr(" ")
+      let dirsStr = s:DirsJoin(" ")
 
       " Print the directory stack with one entry per line.
-    elseif opt == "-p"
-      let dirsStr = s:DirsStr("\n")
+    elseif opt ==# "-p"
+      let dirsStr = s:DirsJoin("\n")
 
       " Print the directory stack with one entry per line, prefixing each entry
       "   with its index in the stack.
-    elseif opt == "-v"
-      call s:StartIterator()
-      let index = 0
-      while s:HasNext()
-        if index != 0
-          let dirsStr = dirsStr . "\n"
-        endif
-        let dirsStr = dirsStr . " " . index . "  " . s:Next()
-        let index = index + 1
-      endwhile
-      call s:StopIterator()
-
+    elseif opt ==# "-v"
+      call s:ResetCounter()
+      let dirsStr = join(s:DirsMap('s:NextCounter() . " " . v:val'), "\n")
     else
       return s:DirsUsage(opt . ": bad argument.")
     endif
@@ -593,6 +575,15 @@ function! s:DirsImpl(...)
     echo dirsStr
   endif
   return dirsStr
+endfunction
+
+function! s:ResetCounter()
+  let s:dirsCounter = -1
+endfunction
+
+function! s:NextCounter()
+  let s:dirsCounter += 1
+  return s:dirsCounter
 endfunction
 
 
@@ -710,7 +701,7 @@ endfunction
 
 " Returns success or failure.
 function! s:ChDir(dir, for)
-  let OLDPWD = getcwd()
+  let oldpwd = getcwd()
   " echo ":cd" a:dir
   let v:errmsg = ''
   silent! exec ":cd" a:dir
@@ -719,7 +710,7 @@ function! s:ChDir(dir, for)
     silent! exec 'exec ":cd" g:'.a:dir
   endif
   if v:errmsg != ''
-    if v:errmsg == "E472: Command failed"
+    if v:errmsg ==# "E472: Command failed"
       let v:errmsg = a:for . ": " . a:dir . ": No such file or diretory"
     endif
     " What is the correct hl group for this, doesn't seem to match vim's
@@ -729,7 +720,7 @@ function! s:ChDir(dir, for)
   endif
 
   " Save the previous dir in g:OLDPWD. 
-  let g:OLDPWD = OLDPWD
+  let g:OLDPWD = oldpwd
   return 1
 endfunction
 
@@ -762,161 +753,158 @@ function! s:DirsUsage(msg)
   return ''
 endfunction
 
+" dirStack primitives {{{
+
 " Count the number of directories in the stack.
 function! s:PPNoOfDirs()
-  return MvNumberOfElements(s:dirStack, s:COMMA_AS_SEP, ',')
+  return len(s:dirStack)
 endfunction
 
 function! s:PPIndexOfDir(dir)
-  return MvIndexOfElement(s:dirStack, s:COMMA_AS_SEP, a:dir, ',')
+  return index(s:dirStack, a:dir)
 endfunction
 
 function! s:PPDirAt(dirIndex)
-  return s:DeEscape(MvElementAt(s:dirStack, s:COMMA_AS_SEP, a:dirIndex, ','))
+  return s:dirStack[a:dirIndex]
 endfunction
 
 function! s:PPClearDirs()
-  let s:dirStack = s:Escape(getcwd()) . ','
+  let s:dirStack = []
 endfunction
 
 function! s:PPRemoveDirAt(dirIndex)
-  let s:dirStack = MvRemoveElementAt(s:dirStack, s:COMMA_AS_SEP, a:dirIndex,
-	\ ',')
+  call remove(s:dirStack, a:dirIndex)
 endfunction
 
 function! s:PPInsertDirAt(dir, dirIndex)
-  let s:dirStack = MvInsertElementAt(s:dirStack, s:COMMA_AS_SEP,
-        \ s:Escape(a:dir), a:dirIndex, ',')
+  call insert(s:dirStack, a:dir, a:dirIndex)
 endfunction
 
 function! s:PPPushToFrontDirAt(dirIndex)
-  let s:dirStack = MvPushToFrontElementAt(s:dirStack, s:COMMA_AS_SEP,
-	\ a:dirIndex, ',')
+  call insert(s:dirStack, remove(s:dirStack, a:dirIndex))
 endfunction
 
 function! s:PPRotateLeftDirAt(dirIndex)
-  let s:dirStack = MvRotateLeftAt(s:dirStack, s:COMMA_AS_SEP, a:dirIndex, ',')
+  let s:dirStack = extend(s:dirStack[a:dirIndex :], s:dirStack[0 : (a:dirIndex-1)])
 endfunction
 
 function! s:PPPromptForDirIndex(default)
-  let dirStack = s:dirStack
-  call MvPromptForElement(dirStack, s:COMMA_AS_SEP,
+  call genutils#PromptForElement(s:dirStack,
         \ (a:default >= 0) ? a:default : '', "Select the directory: ", -1,
-	\ s:useDialogs, ',')
-  return MvGetSelectedIndex()
+	\ s:useDialogs, 1)
+  return genutils#GetSelectedIndex()
 endfunction
 
-function! s:DirsStr(sep)
-  let dirsStr = substitute(s:dirStack, ',$', '', '')
-  return s:DeEscape(substitute(dirsStr, s:COMMA_AS_SEP, a:sep, "g"))
+function! s:DirsJoin(sep)
+  return join(s:dirStack, a:sep)
 endfunction
 
-function! s:StartIterator()
-  call MvIterCreate(s:dirStack, s:COMMA_AS_SEP, "PushPop", ',')
-endfunction
-
-function! s:HasNext()
-  return MvIterHasNext("PushPop")
-endfunction
-
-function! s:Next()
-    return MvIterNext("PushPop")
-endfunction
-
-function! s:StopIterator()
-  call MvIterDestroy("PushPop")
-endfunction
-
-function! s:CPNoOfDirs()
-  return MvNumberOfElements(&cdpath, s:COMMA_AS_SEP, ',') - s:CPIdxAdjst()
-endfunction
-
-function! s:CPDirAt(dirIndex)
-  return s:DeEscape(MvElementAt(&cdpath, s:COMMA_AS_SEP,
-	\ a:dirIndex + s:CPIdxAdjst(), ','))
-endfunction
-
-function! s:CPIndexOfDir(dir)
-  return MvIndexOfElement(&cdpath, s:COMMA_AS_SEP, s:Escape(a:dir), ',') -
-	\ s:CPIdxAdjst()
-endfunction
-
-function! s:CPContainsDir(dir)
-  return MvContainsElement(&cdpath, s:COMMA_AS_SEP, s:Escape(a:dir), ',')
-endfunction
-
-function! s:CPRemoveDirAt(dirIndex)
-  let &cdpath = s:CPFixPath(MvRemoveElementAt(&cdpath, s:COMMA_AS_SEP,
-	\ a:dirIndex + s:CPIdxAdjst(), ','))
-endfunction
-
-function! s:CPInsertDirAt(dir, dirIndex)
-  let &cdpath = s:CPFixPath(MvInsertElementAt(&cdpath, s:COMMA_AS_SEP,
-        \ s:Escape(a:dir), a:dirIndex + s:CPIdxAdjst(), ','))
-endfunction
-
-function! s:CPRemoveDir(dir)
-  let &cdpath = s:CPFixPath(MvRemoveElement(&cdpath, s:COMMA_AS_SEP,
-	\ s:Escape(a:dir), ','))
-endfunction
-
-function! s:CPAddDir(dir)
-  let &cdpath = MvAddElement(&cdpath, s:COMMA_AS_SEP, s:Escape(a:dir), ',')
-endfunction
-
-function! s:CPPromptForDirIndex(default)
-  let cdpath = &cdpath
-  if stridx(cdpath, ',,') == 0
-    let cdpath = strpart(cdpath, 1)
-  endif
-  call MvPromptForElement(cdpath, s:COMMA_AS_SEP,
-        \ (a:default >= 0) ? a:default : '', "Select the directory: ", -1,
-	\ s:useDialogs, ',')
-  return MvGetSelectedIndex()
-endfunction
-
-function! s:CPIdxAdjst()
-  if stridx(&cdpath, ',,') == 0
-    return 1
-  else
-    return 0
-  endif
-endfunction
-
-function! s:CPFixPath(newPath)
-  let newPath = substitute(a:newPath, '\([^,]\),$', '\1', '')
-  if newPath == ','
-    let newPath = ',,'
-  endif
-  " Remove the extra '^,' when removing the empty dir that is at the start of
-  "   the path.
-  if stridx(&cdpath, ',,') == 0 && &cdpath =~ '^,'
-	\ && strpart(&cdpath, 1) == newPath
-    return strpart(newPath, 1)
-  else
-    " Removing the last directory which happens to be the "empty" dir.
-    if &cdpath == ',,' && &cdpath == newPath
-      let newPath = ''
-    endif
-    return newPath
-  endif
+function! s:DirsMap(expr)
+  return map(copy(s:dirStack), a:expr)
 endfunction
 
 function! s:SyncToCurDir()
   let curDir = getcwd()
-  let firstDir = s:PPDirAt(0)
-  if curDir != firstDir
-    call s:PPRemoveDirAt(0)
-    call s:PPInsertDirAt(getcwd(), 0)
+  if s:PPNoOfDirs() == 0
+    call add(s:dirStack, curDir)
+  else
+    let firstDir = s:PPDirAt(0)
+    if curDir != firstDir
+      call s:PPRemoveDirAt(0)
+      call s:PPInsertDirAt(getcwd(), 0)
+    endif
   endif
 endfunction
 
+" }}}
+
+" cdpath primitives {{{
+
+function! s:CPNoOfDirs()
+  return len(s:CPMakePaths(&cdpath))
+endfunction
+
+function! s:CPDirAt(dirIndex)
+  return s:CPMakePaths(&cdpath)[a:dirIndex]
+endfunction
+
+function! s:CPIndexOfDir(dir)
+  return index(s:CPMakePaths(&cdpath), s:Escape(a:dir))
+endfunction
+
+function! s:CPContainsDir(dir)
+  return s:CPIndexOfDir(a:dir) != -1
+endfunction
+
+function! s:CPRemoveDirAt(dirIndex)
+  let paths = s:CPMakePaths(&cdpath)
+  let &cdpath = s:CPMakePath(remove(paths, s:Escape(a:dir), a:dirIndex))
+endfunction
+
+function! s:CPInsertDirAt(dir, dirIndex)
+  let paths = s:CPMakePaths(&cdpath)
+  let &cdpath = s:CPMakePath(insert(paths, s:Escape(a:dir), a:dirIndex))
+endfunction
+
+function! s:CPRemoveDir(dir)
+  let paths = s:CPMakePaths(&cdpath)
+  let dir = s:Escape(a:dir)
+  if index(paths, dir) != -1
+    let &cdpath = s:CPMakePath(remove(paths, index(paths, dir)))
+  endif
+endfunction
+
+function! s:CPAddDir(dir)
+  let paths = s:CPMakePaths(&cdpath)
+  let dir = s:Escape(a:dir)
+  if index(paths, dir) == -1
+    let &cdpath = s:CPMakePath(add(paths, dir))
+  endif
+  "let &cdpath = &cdpath.(&cdpath[strlen(&cdpath)-1] != ',' ? ',' : '').s:Escape(a:dir)
+endfunction
+
+function! s:CPPromptForDirIndex(default)
+  call genutils#PromptForElement(map(s:CPMakePaths(&cdpath),
+	\ 'v:val == "" ? getcwd() : v:val'),
+        \ (a:default >= 0) ? a:default : '', "Select the directory: ", -1,
+	\ s:useDialogs, 1)
+  return genutils#GetSelectedIndex()
+endfunction
+
+function! s:CPMakePaths(path)
+  let paths = split(a:path, s:COMMA_AS_SEP, 1)
+  return (stridx(&cdpath, ',,') == 0) ?
+	\ ((&cdpath == ',,') ? paths[2:] : paths[1:]) : paths
+endfunction
+
+function! s:CPMakePath(paths)
+  if a:paths[0] == ''
+    call insert(a:paths, '', 0)
+  endif
+  return join(a:paths, ',')
+endfunction
+
+" }}}
+
 function! s:LoadSettings()
-  exec 'set cdpath='.GetPersistentVar("PushPop", "cdpath", &cdpath)
+  exec 'set cdpath='.genutils#GetPersistentVar("PushPop", "cdpath", &cdpath)
 endfunction
 
 function! s:SaveSettings()
-  call PutPersistentVar("PushPop", "cdpath", &cdpath)
+  call genutils#PutPersistentVar("PushPop", "cdpath", &cdpath)
+endfunction
+
+" Defining these functions here simplifies the job of initializing dirStack.
+function! s:Escape(dir)
+  " See rules at :help 'path'
+  return escape(escape(escape(a:dir, ', '), "\\"), ' ')
+endfunction
+
+function! s:DeEscape(dir)
+  let dir = a:dir
+  let dir = substitute(dir, '\\\@<!\%(\\\\\)\\\([, ]\)', '\1', 'g')
+  let dir = substitute(dir, '\\\@<!\%(\\\\\)\\ ', ' ', 'g')
+  return genutils#UnEscape(dir, '\\')
 endfunction
 
 
@@ -925,5 +913,7 @@ endfunction
 "endfunction
  
 " Utility functions }}}
+
+call s:Initialize()
 
 " vim6:fdm=marker
